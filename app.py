@@ -90,14 +90,13 @@ chart_options = [
     "선거구별 인구 순위",
     "역대 최대·최소 인구편차 비율",
     "역대 최대·최소·평균 인구 변화",
-    "인접 선거구 인구 비교",
     "표의 등가성 지수 분포",
-    "총선별 표의 등가성 지수 분포 비율",
+    "선거구별 표의 등가성 지수",
     "주민등록인구와 선거인수 관계",
+    "선거인수 ÷ 주민등록인구 비율",
+    "주민등록인구와 투표자수 관계",
     "지역별 주민등록인구와 지역구 수 관계",
     "지역구 1석당 주민등록인구",
-    "역대 총선별 선거구 인구분포(Box Plot)",
-    "인구증감률과 표의 등가성 지수 관계",
 ]
 
 # Map and chart columns retain the same visual width; map uses real 22nd-election polygons.
@@ -107,30 +106,23 @@ with map_col:
     with st.container(border=True):
         st.header("지도 영역")
         map_metric = st.selectbox("지도 표시 기준 선택", map_options, key="map_metric")
-        st.caption("대한민국 중심 확대 · 선거구 이름은 마우스를 올리면 확인할 수 있습니다.")
+        st.caption("제22대 실제 선거구 경계 · 외부 지도 타일 없이 표시합니다. 선거구 이름은 마우스를 올리면 확인할 수 있습니다.")
 
         try:
             geojson = load_constituency_geojson()
             m = folium.Map(
                 location=[36.15, 127.85],
                 zoom_start=7,
-                min_zoom=7,
-                max_zoom=11,
+                min_zoom=6,
+                max_zoom=10,
                 tiles=None,
-                control_scale=False
+                control_scale=False,
+                prefer_canvas=True
             )
-            # Esri gray canvas avoids the CARTO API-key tile error and keeps labels restrained.
-            folium.TileLayer(
-                tiles="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
-                attr="© OpenStreetMap contributors © CARTO",
-                name="글자 없는 밝은 배경",
-                subdomains="abcd",
-                overlay=False,
-                control=False,
-                no_wrap=True
-            ).add_to(m)
-
-            # South Korea-focused bounds: include mainland and Jeju.
+            # No external tile server: no API-key watermark and less visual clutter.
+            m.get_root().html.add_child(folium.Element(
+                "<style>.leaflet-container { background: #f7f9fb !important; }</style>"
+            ))
             korea_bounds = [[33.0, 124.5], [38.7, 131.0]]
             m.fit_bounds(korea_bounds, padding=(12, 12))
 
@@ -200,92 +192,102 @@ with chart_col:
 
         def draw_chart(choice, key):
             st.markdown(f"**{choice}**")
+            if view.empty:
+                st.info("선택한 조건에 해당하는 데이터가 없습니다.")
+                return
+
             if choice == "선거구별 인구 순위":
-                if view.empty:
-                    st.info("표시할 데이터가 없습니다."); return
-                fig = px.bar(view.sort_values("주민등록인구"), x="주민등록인구", y="선거구",
-                             color="시도", orientation="h",
-                             title="선거구별 주민등록인구(예시 데이터)")
-                fig.update_xaxes(tickformat=",")
-                fig.update_layout(height=300, margin=dict(l=5, r=5, t=45, b=5))
-                st.plotly_chart(fig, use_container_width=True, key=key)
+                temp = view.sort_values("주민등록인구", ascending=False)
+                fig = px.bar(temp, x="주민등록인구", y="선거구", color="시도",
+                             orientation="h", title="선거구별 주민등록인구 순위")
+                fig.update_yaxes(categoryorder="total ascending")
+                fig.update_xaxes(tickformat=",", title="주민등록인구(명)")
 
             elif choice == "역대 최대·최소 인구편차 비율":
                 temp = history.copy()
                 temp["최대·최소 인구비율"] = temp["최대인구"] / temp["최소인구"]
                 fig = px.line(temp, x="연도", y="최대·최소 인구비율", markers=True,
-                              title="최대 인구 ÷ 최소 인구(예시 데이터)")
-                fig.update_layout(height=300, margin=dict(l=5, r=5, t=45, b=5))
-                fig.update_yaxes(tickformat=".2f")
-                st.plotly_chart(fig, use_container_width=True, key=key)
+                              text=temp["최대·최소 인구비율"].round(2),
+                              title="최대 선거구 인구 ÷ 최소 선거구 인구")
+                fig.update_traces(textposition="top center")
+                fig.update_yaxes(title="최대·최소 인구비율(배)", tickformat=".2f")
 
             elif choice == "역대 최대·최소·평균 인구 변화":
                 fig = go.Figure()
                 for col, label in [("최대인구", "최대"), ("최소인구", "최소"), ("평균인구", "평균")]:
-                    fig.add_trace(go.Scatter(x=history["연도"], y=history[col], mode="lines+markers", name=label))
-                fig.update_layout(height=300, margin=dict(l=5, r=5, t=45, b=5),
-                                  title="역대 총선별 선거구 인구 변화(예시 데이터)",
-                                  xaxis_title="총선 연도", yaxis_title="인구", yaxis_tickformat=",")
-                st.plotly_chart(fig, use_container_width=True, key=key)
+                    fig.add_trace(go.Scatter(x=history["연도"], y=history[col],
+                                             mode="lines+markers", name=label))
+                fig.update_layout(title="역대 총선별 선거구 인구 변화",
+                                  xaxis_title="총선 연도", yaxis_title="인구(명)",
+                                  yaxis_tickformat=",")
 
-            elif choice == "인접 선거구 인구 비교":
-                st.info("실제 선거구 경계 GeoJSON의 공유 경계를 계산한 뒤 구현합니다.")
-
-            elif choice == "표의 등가성 지수 분포":
-                if view.empty:
-                    st.info("표시할 데이터가 없습니다."); return
+            elif choice in ["표의 등가성 지수 분포", "선거구별 표의 등가성 지수"]:
                 temp = view.copy()
                 temp["표의 등가성 지수"] = districts["주민등록인구"].mean() / temp["주민등록인구"]
-                fig = px.histogram(temp, x="표의 등가성 지수", nbins=10,
-                                   title="전국 평균 인구 ÷ 선거구 인구(예시 데이터)")
-                fig.add_vline(x=1, line_dash="dash", line_color="red")
-                fig.update_layout(height=300, margin=dict(l=5, r=5, t=45, b=5))
-                st.plotly_chart(fig, use_container_width=True, key=key)
-
-            elif choice == "총선별 표의 등가성 지수 분포 비율":
-                st.info("총선별 실제 선거구 인구자료 연결 후 지수 1 초과·미만 비율을 계산합니다.")
+                if choice == "표의 등가성 지수 분포":
+                    fig = px.histogram(temp, x="표의 등가성 지수", nbins=10,
+                                       title="전국 평균 인구 ÷ 선거구 인구")
+                    fig.add_vline(x=1, line_dash="dash", line_color="red",
+                                  annotation_text="전국 평균(1.0)")
+                else:
+                    temp = temp.sort_values("표의 등가성 지수")
+                    fig = px.bar(temp, x="표의 등가성 지수", y="선거구",
+                                 color="시도", orientation="h",
+                                 title="선거구별 표의 등가성 지수")
+                    fig.update_yaxes(categoryorder="total ascending")
+                    fig.add_vline(x=1, line_dash="dash", line_color="red",
+                                  annotation_text="전국 평균(1.0)")
 
             elif choice == "주민등록인구와 선거인수 관계":
-                if view.empty:
-                    st.info("표시할 데이터가 없습니다."); return
                 fig = px.scatter(view, x="주민등록인구", y="선거인수", color="시도",
                                  hover_name="선거구", trendline="ols",
-                                 title="주민등록인구와 선거인수(예시 데이터)")
-                fig.update_layout(height=300, margin=dict(l=5, r=5, t=45, b=5))
-                fig.update_xaxes(tickformat=","); fig.update_yaxes(tickformat=",")
-                st.plotly_chart(fig, use_container_width=True, key=key)
+                                 title="주민등록인구와 선거인수의 관계")
+                fig.update_xaxes(title="주민등록인구(명)", tickformat=",")
+                fig.update_yaxes(title="선거인수(명)", tickformat=",")
+
+            elif choice == "선거인수 ÷ 주민등록인구 비율":
+                temp = view.copy()
+                temp["선거인수 비율(%)"] = temp["선거인수"] / temp["주민등록인구"] * 100
+                fig = px.bar(temp.sort_values("선거인수 비율(%)"),
+                             x="선거인수 비율(%)", y="선거구", color="시도",
+                             orientation="h", title="선거인수 ÷ 주민등록인구")
+                fig.update_yaxes(categoryorder="total ascending")
+                fig.update_xaxes(title="선거인수 비율(%)", ticksuffix="%")
+
+            elif choice == "주민등록인구와 투표자수 관계":
+                fig = px.scatter(view, x="주민등록인구", y="투표자수", color="시도",
+                                 hover_name="선거구", trendline="ols",
+                                 title="주민등록인구와 실제 투표자수의 관계")
+                fig.update_xaxes(title="주민등록인구(명)", tickformat=",")
+                fig.update_yaxes(title="투표자수(명)", tickformat=",")
 
             elif choice == "지역별 주민등록인구와 지역구 수 관계":
                 temp = regions.copy()
-                if selected_region != "전체":
-                    temp = temp[temp["지역"] == selected_region]
                 fig = px.scatter(temp, x="주민등록인구", y="지역구수", text="지역",
                                  trendline="ols",
-                                 title="지역별 주민등록인구와 지역구 수(예시 데이터)")
-                fig.update_layout(height=300, margin=dict(l=5, r=5, t=45, b=5))
-                fig.update_xaxes(tickformat=",")
-                st.plotly_chart(fig, use_container_width=True, key=key)
+                                 title="지역별 주민등록인구와 국회의원 지역구 수")
+                fig.update_traces(textposition="top center")
+                fig.update_xaxes(title="주민등록인구(명)", tickformat=",")
+                fig.update_yaxes(title="지역구 수(석)")
 
             elif choice == "지역구 1석당 주민등록인구":
                 temp = regions.copy()
-                if selected_region != "전체":
-                    temp = temp[temp["지역"] == selected_region]
                 temp["1석당 인구"] = temp["주민등록인구"] / temp["지역구수"]
-                fig = px.bar(temp.sort_values("1석당 인구"), x="지역", y="1석당 인구",
-                             title="지역구 1석당 주민등록인구(예시 데이터)")
-                fig.update_layout(height=300, margin=dict(l=5, r=5, t=45, b=5))
-                fig.update_yaxes(tickformat=",")
-                st.plotly_chart(fig, use_container_width=True, key=key)
+                fig = px.bar(temp.sort_values("1석당 인구"),
+                             x="지역", y="1석당 인구",
+                             title="지역구 1석당 주민등록인구")
+                fig.update_yaxes(title="1석당 인구(명)", tickformat=",")
 
-            elif choice == "역대 총선별 선거구 인구분포(Box Plot)":
-                st.info("총선별 선거구 단위 원자료 연결 후 중앙값·사분위수·이상치를 비교합니다.")
-
-            elif choice == "인구증감률과 표의 등가성 지수 관계":
-                st.info("동일 공간 범위로 재집계한 과거·현재 인구자료 연결 후 산점도와 추세선을 표시합니다.")
+            fig.update_layout(height=350, margin=dict(l=8, r=8, t=48, b=8))
+            st.plotly_chart(fig, use_container_width=True, key=key)
 
         draw_chart(chart1, "chart_one")
         st.divider()
         draw_chart(chart2, "chart_two")
+        st.caption(
+            "인접 선거구 비교·역대 Box Plot·총선별 지수 분포·인구증감률 분석은 "
+            "추가 원자료가 필요해 데이터 확보 후 추가합니다."
+        )
 
 # Details
 detail_name = selected_district if selected_district != "전체 선거구" else selected_map_name
