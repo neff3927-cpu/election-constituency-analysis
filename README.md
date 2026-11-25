@@ -1,1 +1,36 @@
-# 국회의원 지역구 인구와 표의 등가성 분석\n\n실행: `pip install -r requirements.txt` 후 `streamlit run app.py`\n\n- 제22대 실제 선거구 경계 GeoJSON 표시\n- 외부 지도 타일을 제거해 API KEY REQUIRED 워터마크 방지\n- 차트 수치는 예시 CSV 기반이며 실제 통계가 아님\n- 차트 메뉴는 현재 데이터 열로 계산 가능한 분석으로 구성\n
+# 국회의원 지역구 인구와 표의 등가성 분석 — v8
+
+## 실행
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## 이번 버전
+- 지도: 제22대 총선 254개 실제 선거구 GeoJSON, 외부 타일 없이 대한민국 중심으로 고정
+- 차트: 최대·최소 인구편차, 최대·최소·평균 변화, Box Plot, 표의 등가성 지수, 지수 1 초과·미만 비율, 선거인수·투표자수 회귀, 지역별 의석 배분, 인구증감률 등
+- 지도/차트는 동일한 높이의 좌우 패널로 구성
+- 실제 데이터 CSV와 예시 데이터 분리
+- 제23대는 제22대 경계 고정 가정으로 설계
+
+## 중요: 데이터 연결 상태
+현재 `constituency_population.csv` 등은 헤더만 있는 실제 데이터 입력용 서식입니다. `demo_*.csv`는 기존 화면 점검용 가상 데이터입니다. 실제 데이터가 들어오기 전까지 예시자료로 계산된 결과를 연구 결과로 인용하지 마세요.
+
+## 실제 데이터 CSV 규격
+- `data/constituency_population.csv`: `시도,선거구,주민등록인구,선거인수,투표자수,위도,경도,지도명,이전인구`
+- `data/election_history_summary.csv`: `총선,연도,최대인구,최소인구,평균인구`
+- `data/historical_constituencies.csv`: `총선,연도,시도,선거구,주민등록인구`
+- `data/region_population_seats.csv`: `지역,주민등록인구,지역구수`
+- `data/election_voters.csv`: `총선,시도,선거구,선거인수,투표자수`
+- `data/adjacency_population.csv`: `선거구,인접선거구,선거구인구,인접선거구인구`
+
+`지도명`은 GeoJSON 속성 `SIDO_SGG`와 일치시켜야 지도에 인구 색상이 연결됩니다. 선거구 이름만으로 자동 매칭하지 않습니다.
+
+## 자료 출처
+- 제22대 선거구 경계: https://github.com/OhmyNews/2024_22_elec_map
+- 주민등록인구: https://jumin.mois.go.kr/
+- 중앙선거관리위원회 선거인수 정보: https://www.data.go.kr/data/15094967/openapi.do
+- 공공데이터포털: https://www.data.go.kr/
+
+## 지표 해석 주의
+표의 등가성 지수 = 전국 평균 선거구 인구 ÷ 해당 선거구 인구. 주민등록인구 기준 상대지표이며 실제 투표 영향력을 직접 측정하지 않습니다. 지역별 의석수 분석은 인구비례성 탐색이며 법적 위법 판정이 아닙니다. 과거 선거구 비교는 해당 총선 당시 경계와 인구를 함께 사용해야 합니다.
