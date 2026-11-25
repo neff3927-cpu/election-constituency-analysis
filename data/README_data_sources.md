@@ -1,22 +1,12 @@
-# 데이터 현황 및 출처
+# 데이터 연결 가이드
 
-## 실제 반영된 값
-- 제22대 총선: 인구 기준일 2023-01-31. 공식 총람에 기재된 최대 선거구 인구 273,177명(동래구), 최소 136,629명(익산시갑).
-- 평균인구 202,480.4명은 공식 총인구 51,430,018명을 제22대 지역구 254석으로 나눈 계산값입니다. 총람의 선거구별 원자료 전체를 대체하지 않습니다.
-- 제22대 시·도별 지역구 의석수는 확정 의석 배분을 반영했습니다. 주민등록인구 열은 같은 기준일 자료가 확보될 때 입력하도록 비워 두었습니다.
+- `constituency_population.csv`: 제22대 254개 선거구의 주민등록인구 및 선거인수·투표자수
+- `constituency_population_23rd.csv`: 제23대 가정용 인구. 제22대 선거구 경계/이름을 그대로 사용
+- `election_history_summary.csv`: 총선별 최대·최소·평균 선거구 인구
+- `historical_constituencies.csv`: 총선별 선거구 단위 인구. 5-2 지수 분포 계산
+- `adjacency_population.csv`: 선거구별 인접 선거구와 인구
+- `region_population_seats.csv`: 시도별 주민등록인구와 지역구 수
 
-## 아직 미연결인 자료
-- constituency_population.csv: 254개 선거구별 주민등록인구, 선거인수, 투표자수, 지도명 연결 필요
-- historical_constituencies.csv: 역대 총선 선거구별 인구 원자료 필요
-- election_history_summary.csv: 현재 제22대 공식 최대·최소와 계산 평균 1행만 포함. 다른 총선 행은 원자료 확보 후 추가
-- constituency_population_23rd.csv: 제23대 가정 분석용. 제22대 선거구 경계를 유지하고 새 기준일 인구만 입력
-- region_population_seats.csv: 지역구수는 입력, 주민등록인구는 2023-01-31 동일 기준일 자료 입력 필요
-- election_voters.csv / adjacency_population.csv: 선거인수·투표자수 및 인접 관계 자료 입력 필요
+공식 출처: 행정안전부 주민등록 인구통계(https://jumin.mois.go.kr/), 중앙선거관리위원회 선거통계시스템(https://info.nec.go.kr/), 공공데이터포털(https://www.data.go.kr/).
 
-## 출처
-1. 중앙선거관리위원회, 제22대 국회의원선거 총람, 선거구획정안 개요(인구 기준일, 최고·최저 인구).
-2. 중앙선거관리위원회 공공데이터포털 국회의원선거 개표결과: https://www.data.go.kr/data/15025527/fileData.do
-3. 행정안전부 주민등록 인구통계: https://jumin.mois.go.kr/
-4. 제22대 선거구 GeoJSON: https://github.com/OhmyNews/2024_22_elec_map
-
-**주의:** 확인되지 않은 선거구별 수치나 과거 수치를 예시로 채워 실제 통계처럼 표시하지 않았습니다.
+중요: 실제 자료가 확보되지 않은 행을 추정하거나 예시 숫자로 채우지 마세요. 인구 기준일과 선거인명부 기준일을 각 CSV 또는 보고서에 명시하세요.
