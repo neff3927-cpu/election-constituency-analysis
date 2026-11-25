@@ -107,38 +107,32 @@ with map_col:
     with st.container(border=True):
         st.header("지도 영역")
         map_metric = st.selectbox("지도 표시 기준 선택", map_options, key="map_metric")
-        st.caption("제22대 실제 선거구 경계 · 선거구 이름은 마우스를 올리면 확인할 수 있습니다.")
+        st.caption("대한민국 중심 확대 · 선거구 이름은 마우스를 올리면 확인할 수 있습니다.")
 
         try:
             geojson = load_constituency_geojson()
             m = folium.Map(
-                location=[36.2, 127.8],
-                zoom_start=6,
-                min_zoom=5,
-                max_zoom=10,
+                location=[36.15, 127.85],
+                zoom_start=7,
+                min_zoom=7,
+                max_zoom=11,
                 tiles=None,
-                control_scale=True
+                control_scale=False
             )
             # Esri gray canvas avoids the CARTO API-key tile error and keeps labels restrained.
             folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-                attr="Tiles © Esri — Sources: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, METI, and the GIS User Community",
-                name="밝은 회색 배경",
+                tiles="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+                attr="© OpenStreetMap contributors © CARTO",
+                name="글자 없는 밝은 배경",
+                subdomains="abcd",
                 overlay=False,
-                control=False
-            ).add_to(m)
-            # Optional reference layer provides place names without dense road labels.
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-                attr="Labels © Esri",
-                name="지역명",
-                overlay=True,
                 control=False,
-                opacity=0.9
+                no_wrap=True
             ).add_to(m)
 
-            korea_bounds = [[33.0, 124.0], [39.2, 132.0]]
-            m.fit_bounds(korea_bounds)
+            # South Korea-focused bounds: include mainland and Jeju.
+            korea_bounds = [[33.0, 124.5], [38.7, 131.0]]
+            m.fit_bounds(korea_bounds, padding=(12, 12))
 
             def style_feature(feature):
                 return {
