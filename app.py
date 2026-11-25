@@ -30,7 +30,7 @@ div[data-testid="stMetric"]{background:#f5f8fc;padding:12px;border-radius:10px}
 </style>""", unsafe_allow_html=True)
 st.title("국회의원 지역구 인구와 표의 등가성 분석")
 st.caption("산업데이터시각화 프로젝트 · 인터랙티브 대시보드")
-st.warning("자료가 연결되지 않은 분석은 임의의 숫자로 채우지 않습니다. 실제 CSV를 추가하면 해당 차트와 지도 색상이 자동으로 갱신됩니다.")
+st.warning("역대 최대·최소·평균 인구는 공식 선거구획정 자료를 반영했습니다. 254개 선거구 전체 원자료가 필요한 분석은 해당 CSV가 연결된 경우에만 표시합니다.")
 
 @st.cache_data
 
@@ -82,7 +82,7 @@ adj=clean(load_data("adjacency_population.csv"))
 regions=clean(load_data("region_population_seats.csv"))
 
 # 숫자형 열 정리
-for frame, cols in [(current,["주민등록인구","선거인수","투표자수","이전인구","인구증감률"]),(pop23,["주민등록인구","선거인수","투표자수","이전인구"]),(hist,["연도","최대인구","최소인구","평균인구"]),(hist_d,["총선","연도","주민등록인구"]),(regions,["주민등록인구","지역구수"]),(adj,["선거구인구","인접선거구인구"])]:
+for frame, cols in [(current,["주민등록인구","선거인수","투표자수","이전인구","인구증감률"]),(pop23,["주민등록인구","선거인수","투표자수","이전인구"]),(hist,["연도","최대인구","최소인구","평균인구","선거구수"]),(hist_d,["총선","연도","주민등록인구"]),(regions,["주민등록인구","지역구수"]),(adj,["선거구인구","인접선거구인구"])]:
     for c in cols:
         if c in frame: frame[c]=num(frame[c])
 
@@ -165,9 +165,15 @@ with left:
                     colors=["#eff6ff","#bfdbfe","#60a5fa","#2563eb","#1e3a8a"]
                     fill=colors[min(4,max(0,int(t*5)))]
                 return {"fillColor":fill,"color":"#6f8da7","weight":0.6,"fillOpacity":0.88}
-            m=folium.Map(location=[36.3,127.8],zoom_start=6,tiles=None,control_scale=False,prefer_canvas=True)
+            m=folium.Map(location=[36.35,127.85],zoom_start=6,tiles="CartoDB positron",control_scale=False,prefer_canvas=True,min_zoom=5,max_zoom=11)
             folium.GeoJson(geo,name="제22대 지역구",style_function=style,highlight_function=lambda f:{"weight":2,"color":"#172b4d","fillOpacity":1},tooltip=folium.GeoJsonTooltip(fields=[next((k for k in ["SIDO_SGG","SGG_NM","SIG_KOR_NM","NAME","name"] if k in geo["features"][0].get("properties",{})),list(geo["features"][0].get("properties",{}).keys())[0])],aliases=["선거구:"])).add_to(m)
-            m.fit_bounds([[min(ys),min(xs)],[max(ys),max(xs)]],padding=(12,12))
+            # 도서·영해의 극단 좌표 때문에 한반도가 작아지는 현상을 방지하고 대한민국 영역에 초점을 맞춤
+            mainland=[(x,y) for x,y in pts if 124.0 <= x <= 132.5 and 33.0 <= y <= 39.8]
+            if mainland:
+                mx=[p[0] for p in mainland]; my=[p[1] for p in mainland]
+                m.fit_bounds([[min(my),min(mx)],[max(my),max(mx)]],padding=(10,10))
+            else:
+                m.fit_bounds([[min(ys),min(xs)],[max(ys),max(xs)]],padding=(10,10))
             st_folium(m,height=610,use_container_width=True,returned_objects=[])
             st.caption("지도 경계: 제22대 선거구 GeoJSON. 인구 색상은 CSV의 지도명 또는 선거구명이 GeoJSON 속성과 일치하는 경우에만 표시됩니다.")
             if not vals: st.info("경계는 표시 중입니다. 실제 선거구 인구 CSV를 연결하면 선거구별 색상이 표시됩니다.")
@@ -189,18 +195,22 @@ with right:
             if choice=="역대 최대·최소 인구편차 비율":
                 if not valid(hist,["연도","최대인구","최소인구"]): return missing("election_history_summary.csv에 총선별 연도·최대인구·최소인구가 필요합니다.")
                 h=hist.dropna(subset=["연도","최대인구","최소인구"]).sort_values("연도").copy()
+                h["연도"]=num(h["연도"]).astype(int)
                 h["최대·최소 인구비율"]=h["최대인구"]/h["최소인구"].replace(0,np.nan)
-                fig=px.line(h,x="연도",y="최대·최소 인구비율",markers=True,hover_data=["최대인구","최소인구"])
-                fig.update_yaxes(title="최대 인구 ÷ 최소 인구(배)")
-                if len(h)>=2: fig.add_hline(y=2,line_dash="dash",line_color="gray",annotation_text="2:1 참고선")
-                else: st.caption("현재 등록된 총선 자료가 1개이므로 추세 비교는 불가능합니다.")
+                fig=px.line(h,x="연도",y="최대·최소 인구비율",markers=True,hover_data=[c for c in ["총선","최대인구","최소인구","선거구수","인구기준일"] if c in h])
+                fig.update_xaxes(title="총선 연도",tickmode="array",tickvals=h["연도"].tolist(),ticktext=h["연도"].astype(str).tolist())
+                fig.update_yaxes(title="최대 인구 ÷ 최소 인구(배)",tickformat=".2f")
+                fig.add_hline(y=2,line_dash="dash",line_color="gray",annotation_text="2:1 기준선(참고)")
+                if len(h)<2: st.caption("현재 공식 확인 자료가 1개 총선뿐이어서 추세 비교는 불가능합니다.")
             elif choice=="역대 최대·최소·평균 인구 변화":
                 if not valid(hist,["연도","최대인구","최소인구","평균인구"]): return missing("election_history_summary.csv에 총선별 최대·최소·평균 인구가 필요합니다.")
-                h=hist.dropna(subset=["연도"]).sort_values("연도")
+                h=hist.dropna(subset=["연도","최대인구","최소인구","평균인구"]).sort_values("연도").copy()
+                h["연도"]=num(h["연도"]).astype(int)
                 fig=go.Figure()
-                for c,n in [("최대인구","최대"),("최소인구","최소"),("평균인구","평균")]: fig.add_trace(go.Scatter(x=h["연도"],y=h[c],mode="lines+markers",name=n))
-                fig.update_layout(xaxis_title="총선 연도",yaxis_title="인구(명)",yaxis_tickformat=",")
-                if len(h)<2: st.caption("현재 등록된 총선 자료가 1개입니다. 역대 자료를 추가하면 변화 추세가 나타납니다.")
+                for c,n in [("최대인구","최대"),("최소인구","최소"),("평균인구","평균")]:
+                    fig.add_trace(go.Scatter(x=h["연도"],y=h[c],mode="lines+markers",name=n,customdata=h[["총선"]] if "총선" in h else None,hovertemplate="연도=%{x}<br>인구=%{y:,.0f}명<extra></extra>"))
+                fig.update_layout(xaxis_title="총선 연도",yaxis_title="인구(명)",yaxis_tickformat=",",xaxis=dict(tickmode="array",tickvals=h["연도"].tolist(),ticktext=h["연도"].astype(str).tolist()))
+                if len(h)<2: st.caption("총선별 공식 기준 인구 자료가 추가되면 변화 추세를 더 길게 비교할 수 있습니다.")
             elif choice=="선거구별 인구 순위":
                 if not valid(view,["선거구","주민등록인구"]): return missing("constituency_population.csv에 선거구별 주민등록인구가 필요합니다.")
                 t=view.dropna(subset=["주민등록인구"]).sort_values("주민등록인구",ascending=False)
