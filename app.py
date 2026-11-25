@@ -47,11 +47,6 @@ history_districts=read_csv("historical_constituencies.csv")
 region_data=read_csv("region_population_seats.csv")
 voters=read_csv("election_voters.csv")
 
-# Demo data is retained for UI testing only; never mixed with official datasets.
-demo=read_csv("demo_constituencies.csv")
-demo_history=read_csv("demo_history.csv")
-demo_regions=read_csv("demo_region_seats.csv")
-
 def has_cols(df, cols): return not df.empty and set(cols).issubset(df.columns)
 def clean_num(s): return pd.to_numeric(s,errors="coerce")
 
@@ -82,6 +77,9 @@ if has_cols(voters,["총선","시도","선거구","선거인수","투표자수"]
     for c in ["총선","선거인수","투표자수"]: voters[c]=clean_num(voters[c])
 else: voters=pd.DataFrame()
 
+if current.empty:
+    st.warning("실제 선거구 인구자료가 아직 연결되지 않았습니다. 지도 경계와 분석 기능은 제공되며, 통계 결과는 원자료 CSV를 연결한 뒤 표시됩니다.")
+
 # ---------- common controls ----------
 with st.container(border=True):
     st.subheader("공통 입력 위젯")
@@ -92,8 +90,6 @@ with st.container(border=True):
     available_districts=sorted(current["선거구"].dropna().astype(str).unique()) if not current.empty else []
     with c: district=st.selectbox("선거구 검색",["전체 선거구"]+available_districts,key="district")
 
-use_demo=st.toggle("화면 점검용 예시 데이터 미리보기 (실제 통계 아님)",value=False,
-                   help="실제 자료가 연결되기 전 화면 테스트용 가상 수치입니다. 발표·분석에는 사용하지 마세요.")
 if election=="제23대 총선 가정":
     st.info("제23대는 제22대 선거구 경계를 고정하고 인구수만 갱신하는 가정 분석입니다.")
     if has_cols(pop23,["시도","선거구","주민등록인구"]):
@@ -106,16 +102,6 @@ if election=="제23대 총선 가정":
     else:
         current=pd.DataFrame(columns=["시도","선거구","주민등록인구","선거인수","투표자수","자료구분"])
         st.warning("제23대 가정용 인구자료가 아직 없습니다. data/constituency_population_23rd.csv에 제22대와 동일한 선거구 이름으로 인구만 입력하면 됩니다.")
-        use_demo=False
-elif current.empty and use_demo and has_cols(demo,["시도","선거구","주민등록인구"]):
-    st.warning("현재 화면은 가상 예시자료 미리보기입니다. 실제 통계·분석 결과로 인용하면 안 됩니다.")
-    current=demo.copy()
-    for c in ["선거인수","투표자수"]:
-        if c not in current: current[c]=np.nan
-    current["자료구분"]="예시 데이터"
-
-if history_summary.empty and use_demo: history_summary=demo_history.copy()
-if region_data.empty and use_demo: region_data=demo_regions.copy()
 
 view=current.copy()
 if not view.empty:
@@ -124,12 +110,16 @@ if not view.empty:
 
 map_options=["선거구별 주민등록인구","표의 등가성 지수","인접 선거구 인구편차"]
 chart_options=[
-"선거구별 인구 순위","역대 최대·최소 인구편차 비율","역대 최대·최소·평균 인구 변화",
-"역대 선거구 인구분포(Box Plot)","표의 등가성 지수 분포","선거구별 표의 등가성 지수",
-"총선별 지수 1 초과·미만 비율","인접 선거구 인구 비교","주민등록인구와 선거인수 관계",
-"선거인수 ÷ 주민등록인구 비율","주민등록인구와 투표자수 관계",
-"지역별 주민등록인구와 지역구 수 관계","지역구 1석당 주민등록인구",
-"인구증감률과 표의 등가성 지수 관계"]
+    "선거구별 인구 순위",
+    "역대 최대·최소 인구편차 비율",
+    "역대 최대·최소·평균 인구 변화",
+    "인접 선거구 인구 비교",
+    "표의 등가성 지수 분포",
+    "총선별 지수 1 초과·미만 비율",
+    "주민등록인구와 선거인수 관계",
+    "선거인수 ÷ 주민등록인구 비율",
+    "지역별 주민등록인구와 지역구 수 관계",
+]
 
 # ---------- derived metrics ----------
 def add_equity(df):
@@ -177,20 +167,34 @@ with map_col:
         return {"fillColor":fill,"color":"#6b879f","weight":0.55,"fillOpacity":0.85}
       # Basemap + GeoJSON-derived bounds prevent the district layer from appearing
       # tiny or clipped at the bottom of the map frame.
-      m=folium.Map(location=[36.3,127.8],zoom_start=6,tiles="CartoDB positron",
-                   control_scale=True,prefer_canvas=True)
+      # 타일 서버 접속 여부에 좌우되지 않도록 배경지도를 제거하고
+      # GeoJSON 자체 좌표에서 정확한 대한민국 범위를 계산해 맞춥니다.
+      def collect_pairs(obj, out):
+          if isinstance(obj, (list, tuple)):
+              if len(obj) >= 2 and isinstance(obj[0], (int, float)) and isinstance(obj[1], (int, float)):
+                  out.append((float(obj[0]), float(obj[1])))
+              else:
+                  for item in obj: collect_pairs(item, out)
+      pairs=[]
+      for feature in geo.get("features", []):
+          geom=feature.get("geometry") or {}
+          collect_pairs(geom.get("coordinates", []), pairs)
+      if not pairs:
+          raise ValueError("GeoJSON 좌표를 읽을 수 없습니다.")
+      lons=[p[0] for p in pairs]; lats=[p[1] for p in pairs]
+      min_lon,max_lon,min_lat,max_lat=min(lons),max(lons),min(lats),max(lats)
+      m=folium.Map(location=[(min_lat+max_lat)/2,(min_lon+max_lon)/2],
+                   zoom_start=6,tiles=None,control_scale=True,prefer_canvas=True)
       district_layer=folium.GeoJson(
         geo, name="제22대 국회의원 선거구",
         style_function=style,
         highlight_function=lambda f:{"weight":2,"color":"#102a43","fillOpacity":.95},
         tooltip=folium.GeoJsonTooltip(fields=["SIDO_SGG"],aliases=["선거구:"],sticky=False)
       ).add_to(m)
-      bounds=district_layer.get_bounds()
-      if bounds and len(bounds)==2:
-          m.fit_bounds(bounds,padding=(18,18),max_zoom=7)
+      m.fit_bounds([[min_lat,min_lon],[max_lat,max_lon]],padding=(24,24),max_zoom=7)
       folium.LayerControl(collapsed=True).add_to(m)
-      st_folium(m,height=640,use_container_width=True,returned_objects=[])
-      st.caption("제22대 실제 선거구 경계 254개 · 바탕지도는 글자가 적은 CartoDB Positron을 사용합니다. 인구 색상은 지도명(SIDO_SGG)과 실제 자료의 지도명이 일치할 때 연결됩니다.")
+      st_folium(m,height=610,use_container_width=True,returned_objects=[])
+      st.caption("제22대 실제 선거구 경계 254개 · 외부 바탕지도 없이 대한민국 경계만 표시합니다. 인구 색상은 지도명(SIDO_SGG)과 실제 자료의 지도명이 일치할 때 연결됩니다.")
       if view.empty:
           st.info("실제 선거구 인구자료가 아직 연결되지 않았습니다. 현재는 제22대 선거구 경계만 표시합니다.")
       if map_metric=="인접 선거구 인구편차": st.info("인접 선거구 편차 지도는 adjacency_population.csv에 실제 인접 선거구 자료를 연결한 뒤 색상화합니다.")
@@ -228,20 +232,10 @@ with chart_col:
           fig=go.Figure()
           for col,label in [("최대인구","최대"),("최소인구","최소"),("평균인구","평균")]: fig.add_trace(go.Scatter(x=h["연도"],y=h[col],mode="lines+markers",name=label))
           fig.update_layout(xaxis_title="총선 연도",yaxis_title="인구(명)",yaxis_tickformat=",")
-      elif choice=="역대 선거구 인구분포(Box Plot)":
-        if history_districts.empty: return no_data("총선·연도·시도·선거구·주민등록인구 열이 있는 historical_constituencies.csv가 필요합니다.")
-        fig=px.box(history_districts,x="총선",y="주민등록인구",color="총선",points="outliers",hover_data=["시도","선거구"])
-        fig.update_yaxes(title="선거구 인구(명)",tickformat=",")
-      elif choice in ["표의 등가성 지수 분포","선거구별 표의 등가성 지수"]:
+      elif choice=="표의 등가성 지수 분포":
         if view.empty or "표의 등가성 지수" not in view: return no_data()
-        if choice=="표의 등가성 지수 분포":
-          fig=px.histogram(view,x="표의 등가성 지수",nbins=15,color_discrete_sequence=["#2878b5"])
-          fig.add_vline(x=1,line_dash="dash",line_color="red",annotation_text="전국 평균=1")
-        else:
-          t=view.sort_values("표의 등가성 지수")
-          fig=px.bar(t,x="표의 등가성 지수",y="선거구",color="시도",orientation="h")
-          fig.add_vline(x=1,line_dash="dash",line_color="red")
-          fig.update_yaxes(categoryorder="total ascending")
+        fig=px.histogram(view,x="표의 등가성 지수",nbins=15,color_discrete_sequence=["#2878b5"])
+        fig.add_vline(x=1,line_dash="dash",line_color="red",annotation_text="전국 평균=1")
       elif choice=="총선별 지수 1 초과·미만 비율":
         if history_districts.empty: return no_data("총선별 선거구 단위 인구 원자료가 필요합니다.")
         h=history_districts.copy(); h["평균인구"]=h.groupby("총선")["주민등록인구"].transform("mean"); h["지수"]=h["평균인구"]/h["주민등록인구"]
@@ -268,31 +262,20 @@ with chart_col:
           t=t.dropna(subset=["선거인수"])
           if t.empty:return no_data("선거인수 열이 실제 자료에 있어야 합니다.")
           t["선거인수 비율(%)"]=t["선거인수"]/t["주민등록인구"]*100
-          fig=px.bar(t.sort_values("선거인수 비율(%)"),x="선거인수 비율(%)",y="선거구",color="시도",orientation="h")
-          fig.update_yaxes(categoryorder="total ascending")
+          fig=px.scatter(t,x="주민등록인구",y="선거인수 비율(%)",color="시도",hover_name="선거구")
+          fig.update_yaxes(title="선거인수 ÷ 주민등록인구(%)")
         else:
           t=t.dropna(subset=["투표자수"])
           if t.empty:return no_data("투표자수 열이 실제 자료에 있어야 합니다.")
           fig=px.scatter(t,x="주민등록인구",y="투표자수",color="시도",hover_name="선거구",trendline="ols")
           fig.update_yaxes(title="투표자수(명)",tickformat=",")
         fig.update_xaxes(title="주민등록인구(명)",tickformat=",")
-      elif choice in ["지역별 주민등록인구와 지역구 수 관계","지역구 1석당 주민등록인구"]:
+      elif choice=="지역별 주민등록인구와 지역구 수 관계":
         if region_data.empty:return no_data("region_population_seats.csv의 실제 시도별 인구·지역구 의석 자료가 필요합니다.")
         t=region_data.copy()
-        if choice=="지역별 주민등록인구와 지역구 수 관계":
-          fig=px.scatter(t,x="주민등록인구",y="지역구수",text="지역",trendline="ols")
-          fig.update_traces(textposition="top center"); fig.update_yaxes(title="지역구 의석수(석)")
-        else:
-          t["1석당 인구"]=t["주민등록인구"]/t["지역구수"].replace(0,np.nan)
-          fig=px.bar(t.sort_values("1석당 인구"),x="지역",y="1석당 인구")
-          fig.update_yaxes(title="지역구 1석당 인구(명)",tickformat=",")
+        fig=px.scatter(t,x="주민등록인구",y="지역구수",text="지역",trendline="ols")
+        fig.update_traces(textposition="top center"); fig.update_yaxes(title="지역구 의석수(석)")
         fig.update_xaxes(title="주민등록인구(명)",tickformat=",")
-      elif choice=="인구증감률과 표의 등가성 지수 관계":
-        if view.empty or view["이전인구"].isna().all():return no_data("현재 인구와 동일한 공간 범위의 이전 인구가 필요합니다. 경계가 달라진 경우 읍면동 단위로 재집계해야 합니다.")
-        t=view.dropna(subset=["이전인구","주민등록인구"]).copy(); t["인구증감률(%)"]=(t["주민등록인구"]/t["이전인구"]-1)*100
-        t["표의 등가성 지수"]=t["주민등록인구"].mean()/t["주민등록인구"]
-        fig=px.scatter(t,x="인구증감률(%)",y="표의 등가성 지수",color="시도",hover_name="선거구",trendline="ols")
-        fig.add_hline(y=1,line_dash="dash",line_color="gray")
       if fig is not None:
         fig.update_layout(height=330,margin=dict(l=8,r=8,t=35,b=8),legend_title_text="")
         st.plotly_chart(fig,use_container_width=True,key=slot)
@@ -316,17 +299,13 @@ if not view.empty:
 else: st.info("실제 선거구 인구 CSV를 연결하면 상세정보가 표시됩니다.")
 
 with st.expander("데이터 파일 형식 및 출처"):
-    st.markdown("""**실제 데이터 파일은 `data/` 폴더의 CSV 서식에 맞춰 넣어주세요.**
+    st.markdown("""**실제 데이터 파일은 `data/` 폴더의 CSV 서식에 맞춰 넣어주세요. 현재 배포 파일에는 원자료가 포함되어 있지 않습니다.**
 - `constituency_population.csv`: 시도, 선거구, 주민등록인구, 선거인수, 투표자수, 위도, 경도, 지도명, 이전인구
 - `election_history_summary.csv`: 총선, 연도, 최대인구, 최소인구, 평균인구
-- `historical_constituencies.csv`: 총선, 연도, 시도, 선거구, 주민등록인구
+- `historical_constituencies.csv`: 총선, 연도, 시도, 선거구, 주민등록인구 (총선별 지수 비율 계산용)
 - `region_population_seats.csv`: 지역, 주민등록인구, 지역구수
 - `election_voters.csv`: 총선, 시도, 선거구, 선거인수, 투표자수
 
 지도 경계: [OhmyNews 제22대 선거구 GeoJSON](https://github.com/OhmyNews/2024_22_elec_map) · 선거인수 API: [공공데이터포털 중앙선거관리위원회 선거인수 정보](https://www.data.go.kr/data/15094967/openapi.do) · 인구: [행정안전부 주민등록 인구통계](https://jumin.mois.go.kr/)
 
 **주의:** 표의 등가성 지수는 `전국 평균 선거구 인구 ÷ 해당 선거구 인구`로 계산한 주민등록인구 기준 상대지표이며 실제 투표 영향력을 직접 측정하지 않습니다. 지역별 의석수 분석도 법적 위법 여부 판정이 아닌 인구비례성 탐색입니다.""")
-with st.expander("화면 점검용 예시 데이터 보기"):
-    st.caption("예시자료는 기능 확인용 가상 데이터이며 연구 결과·발표 근거로 사용하면 안 됩니다.")
-    if not demo.empty: st.dataframe(demo,use_container_width=True)
-    if not demo_history.empty: st.dataframe(demo_history,use_container_width=True)
