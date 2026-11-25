@@ -227,7 +227,7 @@ with chart_col:
   with st.container(border=True):
     st.header("차트 영역")
     x,y=st.columns(2)
-    with x: chart1=st.selectbox("차트 1 선택",chart_options,index=0,key="chart1")
+    with x: chart1=st.selectbox("차트 1 선택",chart_options,index=1,key="chart1")
     with y: chart2=st.selectbox("차트 2 선택",chart_options,index=2,key="chart2")
 
     def no_data(msg="이 분석에 필요한 실제 원자료가 아직 연결되지 않았습니다."):
@@ -285,7 +285,11 @@ with chart_col:
       elif choice=="지역별 주민등록인구와 지역구 수 관계":
         if region_data.empty:return no_data("region_population_seats.csv의 실제 시도별 인구·지역구 의석 자료가 필요합니다.")
         t=region_data.copy()
-        fig=px.scatter(t,x="주민등록인구",y="지역구수",text="지역",trendline="ols")
+        t["주민등록인구"]=clean_num(t["주민등록인구"])
+        t["지역구수"]=clean_num(t["지역구수"])
+        t=t.dropna(subset=["주민등록인구","지역구수"])
+        if len(t)<2: return no_data("시도별 주민등록인구(동일 기준일) 자료를 추가해야 산점도와 회귀선을 표시할 수 있습니다. 현재 파일에는 공식 지역구 의석수만 입력되어 있습니다.")
+        fig=px.scatter(t,x="주민등록인구",y="지역구수",text="지역",trendline="ols" if len(t)>=2 else None)
         fig.update_traces(textposition="top center"); fig.update_yaxes(title="지역구 의석수(석)")
         fig.update_xaxes(title="주민등록인구(명)",tickformat=",")
       if fig is not None:
@@ -315,13 +319,13 @@ if not view.empty:
 else: st.info("실제 선거구 인구 CSV를 연결하면 상세정보가 표시됩니다.")
 
 with st.expander("데이터 파일 형식 및 출처"):
-    st.markdown("""**실제 데이터 파일은 `data/` 폴더의 CSV 서식에 맞춰 넣어주세요. 현재 배포 파일에는 원자료가 포함되어 있지 않습니다.**
-- `constituency_population.csv`: 시도, 선거구, 주민등록인구, 선거인수, 투표자수, 위도, 경도, 지도명, 이전인구
+    st.markdown("""**데이터 현황:** 제22대 총람에서 확인되는 전국 최대·최소 선거구 인구와 총인구 기반 평균값, 제22대 시·도별 지역구 의석수를 반영했습니다. 선거구별 254개 인구 원자료·선거인수·투표자수와 과거 총선별 전체 분포는 아직 연결되지 않았으므로 임의의 수치를 넣지 않았습니다.
+- `constituency_population.csv`: 시도, 선거구, 주민등록인구, 선거인수, 투표자수, 위도, 경도, 지도명, 이전인구 (제22대 기준 인구일: 2023-01-31)
 - `election_history_summary.csv`: 총선, 연도, 최대인구, 최소인구, 평균인구
 - `historical_constituencies.csv`: 총선, 연도, 시도, 선거구, 주민등록인구 (총선별 지수 비율 계산용)
 - `region_population_seats.csv`: 지역, 주민등록인구, 지역구수
 - `election_voters.csv`: 총선, 시도, 선거구, 선거인수, 투표자수
 
-지도 경계: [OhmyNews 제22대 선거구 GeoJSON](https://github.com/OhmyNews/2024_22_elec_map) · 선거인수 API: [공공데이터포털 중앙선거관리위원회 선거인수 정보](https://www.data.go.kr/data/15094967/openapi.do) · 인구: [행정안전부 주민등록 인구통계](https://jumin.mois.go.kr/)
+지도 경계: [OhmyNews 제22대 선거구 GeoJSON](https://github.com/OhmyNews/2024_22_elec_map) · 선거인수/개표결과: [공공데이터포털 중앙선거관리위원회 국회의원선거 개표결과](https://www.data.go.kr/data/15025527/fileData.do) · 인구: [행정안전부 주민등록 인구통계](https://jumin.mois.go.kr/) · 공식 근거: [중앙선거관리위원회 제22대 국회의원선거 총람](https://www.nec.go.kr/)
 
 **주의:** 표의 등가성 지수는 `전국 평균 선거구 인구 ÷ 해당 선거구 인구`로 계산한 주민등록인구 기준 상대지표이며 실제 투표 영향력을 직접 측정하지 않습니다. 지역별 의석수 분석도 법적 위법 여부 판정이 아닌 인구비례성 탐색입니다.""")
