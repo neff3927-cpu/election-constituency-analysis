@@ -1,5 +1,6 @@
 from pathlib import Path
 import pandas as pd
+import requests
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
@@ -42,7 +43,19 @@ def load_data():
         pd.read_csv(DATA / "demo_region_seats.csv")
     )
 
+
 districts, history, regions = load_data()
+
+GEOJSON_URL = "https://raw.githubusercontent.com/OhmyNews/2024_22_elec_map/main/2024_22_Elec_simplify.json"
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_constituency_geojson():
+    response = requests.get(GEOJSON_URL, timeout=25)
+    response.raise_for_status()
+    geo = response.json()
+    if geo.get("type") != "FeatureCollection" or not geo.get("features"):
+        raise ValueError("GeoJSON 형식이 올바르지 않습니다.")
+    return geo
 
 # Common widgets
 with st.container(border=True):
@@ -87,87 +100,103 @@ chart_options = [
     "인구증감률과 표의 등가성 지수 관계",
 ]
 
-# Fixed-height panels make the map and chart column visually balanced.
+# Map and chart columns retain the same visual width; map uses real 22nd-election polygons.
 map_col, chart_col = st.columns([1, 1], gap="large")
 
 with map_col:
-    with st.container(height=790, border=True):
+    with st.container(border=True):
         st.header("지도 영역")
         map_metric = st.selectbox("지도 표시 기준 선택", map_options, key="map_metric")
-        st.caption("대한민국 영역으로 고정 · 마커 선택 시 아래 상세정보가 갱신됩니다.")
+        st.caption("제22대 실제 선거구 경계 · 선거구 이름은 마우스를 올리면 확인할 수 있습니다.")
 
-        if view.empty:
-            st.info("선택 조건에 해당하는 선거구가 없습니다.")
-            selected_map_name = None
-        else:
-            # Korea-focused, label-free basemap. The real district GeoJSON will replace
-            # the temporary demo markers in the next data-integration step.
+        try:
+            geojson = load_constituency_geojson()
             m = folium.Map(
-                location=[36.25, 127.8],
+                location=[36.2, 127.8],
                 zoom_start=6,
-                min_zoom=6,
+                min_zoom=5,
                 max_zoom=10,
                 tiles=None,
-                control_scale=True,
-                max_bounds=True
+                control_scale=True
             )
+            # Esri gray canvas avoids the CARTO API-key tile error and keeps labels restrained.
             folium.TileLayer(
-                tiles="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
-                attr="© OpenStreetMap contributors © CARTO",
-                name="간결한 지도",
-                subdomains="abcd",
-                max_zoom=20,
-                no_wrap=True
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+                attr="Tiles © Esri — Sources: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, METI, and the GIS User Community",
+                name="밝은 회색 배경",
+                overlay=False,
+                control=False
+            ).add_to(m)
+            # Optional reference layer provides place names without dense road labels.
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+                attr="Labels © Esri",
+                name="지역명",
+                overlay=True,
+                control=False,
+                opacity=0.9
             ).add_to(m)
 
-            # Restrict map viewport to South Korea; exclude most neighboring countries.
-            korea_bounds = [[33.0, 124.0], [39.8, 132.2]]
+            korea_bounds = [[33.0, 124.0], [39.2, 132.0]]
             m.fit_bounds(korea_bounds)
-            m.options["maxBounds"] = korea_bounds
-            m.options["maxBoundsViscosity"] = 1.0
 
-            if map_metric == "선거구별 주민등록인구":
-                metric_values = view["주민등록인구"]
-            elif map_metric == "표의 등가성 지수":
-                metric_values = districts["주민등록인구"].mean() / view["주민등록인구"]
-            else:
-                metric_values = pd.Series([0] * len(view), index=view.index)
-                st.caption("인접 선거구 인구편차는 실제 선거구 경계 GeoJSON을 연결한 뒤 계산합니다.")
+            def style_feature(feature):
+                return {
+                    "fillColor": "#dce8f2",
+                    "color": "#58758f",
+                    "weight": 0.65,
+                    "fillOpacity": 0.58
+                }
 
-            lo, hi = float(metric_values.min()), float(metric_values.max())
-            for idx, row in view.iterrows():
-                value = float(metric_values.loc[idx])
-                ratio = (value - lo) / (hi - lo) if hi != lo else 0.5
-                color = "#2166ac" if ratio < 1/3 else ("#fdae61" if ratio < 2/3 else "#b2182b")
-                popup = (
-                    f"<b>{row['선거구']}</b><br>시도: {row['시도']}<br>"
-                    f"주민등록인구: {row['주민등록인구']:,}명"
+            folium.GeoJson(
+                geojson,
+                name="제22대 국회의원 지역구",
+                style_function=style_feature,
+                highlight_function=lambda feature: {
+                    "weight": 2.2,
+                    "color": "#173f5f",
+                    "fillColor": "#8db8d8",
+                    "fillOpacity": 0.78
+                },
+                tooltip=folium.GeoJsonTooltip(
+                    fields=["SIDO_SGG"],
+                    aliases=["선거구:"],
+                    sticky=True,
+                    localize=True,
+                    style="background-color: white; color: #222; font-family: sans-serif; font-size: 12px; padding: 6px;"
+                ),
+                popup=folium.GeoJsonPopup(
+                    fields=["SIDO_SGG", "SGG_Code"],
+                    aliases=["선거구:", "선거구 코드:"],
+                    labels=True
                 )
-                folium.CircleMarker(
-                    [row["위도"], row["경도"]],
-                    radius=8, color=color, weight=2,
-                    fill=True, fill_color=color, fill_opacity=0.85,
-                    tooltip=row["선거구"],
-                    popup=folium.Popup(popup, max_width=220)
-                ).add_to(m)
+            ).add_to(m)
 
-            map_result = st_folium(
-                m, height=610, use_container_width=True,
-                returned_objects=["last_object_clicked"]
+            st_folium(
+                m,
+                height=625,
+                use_container_width=True,
+                returned_objects=[]
             )
-            clicked = map_result.get("last_object_clicked") if map_result else None
+            st.caption(
+                "경계 자료: OhmyNews 공개 제22대 선거구 GeoJSON(254개 지역구, EPSG:4326). "
+                "현재 통계 CSV는 예시자료이므로 경계 색상은 실제 인구수에 따른 단계구분이 아닙니다."
+            )
+            if map_metric == "인접 선거구 인구편차":
+                st.info("인접 선거구 편차는 경계 공유 관계와 실제 인구자료를 연결한 뒤 계산합니다.")
+            elif map_metric == "표의 등가성 지수":
+                st.info("표의 등가성 지수별 색상은 실제 선거구 인구자료 연결 후 표시합니다.")
+            else:
+                st.info("선거구별 인구에 따른 색상은 실제 선거구 인구자료 연결 후 표시합니다.")
             selected_map_name = None
-            if clicked and clicked.get("lat") is not None and clicked.get("lng") is not None:
-                nearest_idx = (
-                    (view["위도"] - clicked["lat"]) ** 2 +
-                    (view["경도"] - clicked["lng"]) ** 2
-                ).idxmin()
-                selected_map_name = view.loc[nearest_idx, "선거구"]
 
-            st.caption("현재는 글자 없는 배경지도와 예시 마커입니다. 다음 단계에서 실제 제22대 선거구 경계 폴리곤을 연결합니다.")
+        except Exception as exc:
+            st.error("실제 선거구 경계 파일을 불러오지 못했습니다. 인터넷 연결 또는 원본 저장소 상태를 확인해 주세요.")
+            st.caption(f"오류 내용: {type(exc).__name__}")
+            selected_map_name = None
 
 with chart_col:
-    with st.container(height=790, border=True):
+    with st.container(border=True):
         st.header("차트 영역")
         cc1, cc2 = st.columns(2)
         with cc1:
@@ -283,6 +312,13 @@ with st.container(border=True):
         st.info("전국 순위와 인접 선거구 정보는 실제 선거구별 인구·경계자료 연결 후 추가합니다.")
     else:
         st.info("지역 또는 선거구를 선택하면 상세정보가 표시됩니다.")
+
+with st.expander("지도 및 데이터 출처"):
+    st.markdown(
+        "- 제22대 선거구 경계: [OhmyNews/2024_22_elec_map](https://github.com/OhmyNews/2024_22_elec_map) (MIT License)\\n"
+        "- 경계 구성: 통계청 행정동 경계를 제22대 254개 지역구 단위로 결합한 GeoJSON\\n"
+        "- 인구·선거인수 CSV: 현재 화면 점검용 예시자료이며 실제 통계가 아님"
+    )
 
 with st.expander("현재 사용 중인 예시 데이터 확인"):
     st.caption("임의의 화면 점검용 자료이며 실제 선거 통계가 아닙니다.")
