@@ -25,12 +25,22 @@ st.caption("산업데이터시각화 프로젝트 · 인터랙티브 대시보�
 
 # ---------- data loading ----------
 @st.cache_data
-
 def read_csv(name):
     p=DATA/name
     if not p.exists(): return pd.DataFrame()
-    try: return pd.read_csv(p, encoding="utf-8-sig")
-    except Exception: return pd.read_csv(p)
+    try:
+        df = pd.read_csv(p, encoding="utf-8-sig")
+    except Exception:
+        df = pd.read_csv(p)
+    # CSV 열 이름의 BOM·앞뒤 공백·일부 흔한 표기 차이를 정리합니다.
+    df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
+    aliases = {
+        "선거인 수": "선거인수", "선거인수(명)": "선거인수",
+        "투표자 수": "투표자수", "투표자수(명)": "투표자수",
+        "주민등록인구(명)": "주민등록인구", "인구수": "주민등록인구",
+        "시도명": "시도", "지역명": "지역", "지역구 수": "지역구수"
+    }
+    return df.rename(columns={k:v for k,v in aliases.items() if k in df.columns and v not in df.columns})
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def load_geojson():
@@ -49,6 +59,13 @@ voters=read_csv("election_voters.csv")
 
 def has_cols(df, cols): return not df.empty and set(cols).issubset(df.columns)
 def clean_num(s): return pd.to_numeric(s,errors="coerce")
+def ensure_columns(df, columns):
+    """선택한 분석에 필요한 열이 빠져 있어도 앱 전체가 중단되지 않게 보정합니다."""
+    d = df.copy()
+    for col in columns:
+        if col not in d.columns:
+            d[col] = np.nan
+    return d
 
 # Standardize expected current-district columns.
 if has_cols(current,["시도","선거구","주민등록인구"]):
@@ -59,6 +76,9 @@ if has_cols(current,["시도","선거구","주민등록인구"]):
     current["자료구분"]="실제 자료"
 else:
     current=pd.DataFrame()
+
+if not current.empty:
+    current = ensure_columns(current, ["선거인수", "투표자수", "이전인구", "인구증감률", "지도명"])
 
 if has_cols(history_summary,["총선","연도","최대인구","최소인구","평균인구"]):
     for c in ["총선","연도","최대인구","최소인구","평균인구"]: history_summary[c]=clean_num(history_summary[c])
@@ -98,6 +118,7 @@ if election=="제23대 총선 가정":
             if c in current: current[c]=clean_num(current[c])
         for c in ["선거인수","투표자수","이전인구"]:
             if c not in current: current[c]=np.nan
+        current = ensure_columns(current, ["선거인수", "투표자수", "이전인구", "인구증감률", "지도명"])
         current["자료구분"]="제23대 가정자료"
     else:
         current=pd.DataFrame(columns=["시도","선거구","주민등록인구","선거인수","투표자수","자료구분"])
@@ -109,16 +130,16 @@ if not view.empty:
     if district!="전체 선거구": view=view[view["선거구"].astype(str)==district]
 
 map_options=["선거구별 주민등록인구","표의 등가성 지수","인접 선거구 인구편차"]
+# 사용자가 최종 확정한 분석 항목만 표시합니다. 추가 차트는 넣지 않습니다.
 chart_options=[
-    "선거구별 인구 순위",
-    "역대 최대·최소 인구편차 비율",
-    "역대 최대·최소·평균 인구 변화",
-    "인접 선거구 인구 비교",
-    "표의 등가성 지수 분포",
-    "총선별 지수 1 초과·미만 비율",
-    "주민등록인구와 선거인수 관계",
-    "선거인수 ÷ 주민등록인구 비율",
-    "지역별 주민등록인구와 지역구 수 관계",
+    "선거구별 인구 순위",                         # 2
+    "역대 최대·최소 인구편차 비율",               # 1-1
+    "역대 최대·최소·평균 인구 변화",              # 1-2
+    "인접 선거구 인구 비교",                       # 3
+    "표의 등가성 지수 분포",                       # 5-1
+    "총선별 지수 1 초과·미만 비율",                # 5-2
+    "주민등록인구와 선거인수 관계",                # 7-A
+    "지역별 주민등록인구와 지역구 수 관계",        # 7-B
 ]
 
 # ---------- derived metrics ----------
@@ -251,25 +272,16 @@ with chart_col:
         if t.empty: return no_data("선택 선거구의 인접 관계 데이터가 없습니다.")
         long=pd.concat([pd.DataFrame({"구분":t["선거구"],"인구":t["선거구인구"]}),pd.DataFrame({"구분":t["인접선거구"],"인구":t["인접선거구인구"]})])
         fig=px.bar(long,x="인구",y="구분",orientation="h",color="구분")
-      elif choice in ["주민등록인구와 선거인수 관계","선거인수 ÷ 주민등록인구 비율","주민등록인구와 투표자수 관계"]:
-        t=view.dropna(subset=["주민등록인구"]).copy() if not view.empty else pd.DataFrame()
-        if choice=="주민등록인구와 선거인수 관계":
-          t=t.dropna(subset=["선거인수"])
-          if t.empty:return no_data("선거인수 열이 실제 자료에 있어야 합니다.")
-          fig=px.scatter(t,x="주민등록인구",y="선거인수",color="시도",hover_name="선거구",trendline="ols")
-          fig.update_yaxes(title="선거인수(명)",tickformat=",")
-        elif choice=="선거인수 ÷ 주민등록인구 비율":
-          t=t.dropna(subset=["선거인수"])
-          if t.empty:return no_data("선거인수 열이 실제 자료에 있어야 합니다.")
-          t["선거인수 비율(%)"]=t["선거인수"]/t["주민등록인구"]*100
-          fig=px.scatter(t,x="주민등록인구",y="선거인수 비율(%)",color="시도",hover_name="선거구")
-          fig.update_yaxes(title="선거인수 ÷ 주민등록인구(%)")
-        else:
-          t=t.dropna(subset=["투표자수"])
-          if t.empty:return no_data("투표자수 열이 실제 자료에 있어야 합니다.")
-          fig=px.scatter(t,x="주민등록인구",y="투표자수",color="시도",hover_name="선거구",trendline="ols")
-          fig.update_yaxes(title="투표자수(명)",tickformat=",")
+      elif choice=="주민등록인구와 선거인수 관계":
+        if view.empty: return no_data()
+        t=ensure_columns(view,["주민등록인구","선거인수","시도","선거구"]).copy()
+        t["주민등록인구"]=clean_num(t["주민등록인구"])
+        t["선거인수"]=clean_num(t["선거인수"])
+        t=t.dropna(subset=["주민등록인구","선거인수"])
+        if t.empty:return no_data("선거인수 자료가 아직 연결되지 않았습니다. 인구자료 CSV에 선거인수 열을 추가해 주세요.")
+        fig=px.scatter(t,x="주민등록인구",y="선거인수",color="시도",hover_name="선거구",trendline="ols" if len(t)>=2 else None)
         fig.update_xaxes(title="주민등록인구(명)",tickformat=",")
+        fig.update_yaxes(title="선거인수(명)",tickformat=",")
       elif choice=="지역별 주민등록인구와 지역구 수 관계":
         if region_data.empty:return no_data("region_population_seats.csv의 실제 시도별 인구·지역구 의석 자료가 필요합니다.")
         t=region_data.copy()
@@ -288,7 +300,11 @@ st.divider()
 st.header("선거구 상세정보")
 if not view.empty:
     chosen=district if district!="전체 선거구" else str(view.iloc[0]["선거구"])
-    row=view[view["선거구"].astype(str)==chosen].iloc[0]
+    selected_rows=view[view["선거구"].astype(str)==chosen]
+    if selected_rows.empty:
+        chosen=str(view.iloc[0]["선거구"])
+        selected_rows=view[view["선거구"].astype(str)==chosen]
+    row=selected_rows.iloc[0]
     avg=float(view["주민등록인구"].mean())
     d1,d2,d3,d4=st.columns(4)
     d1.metric("선거구",chosen); d2.metric("주민등록인구",f"{row['주민등록인구']:,.0f}명")
