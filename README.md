@@ -1,18 +1,1 @@
-# 국회의원 지역구 인구와 표의 등가성 분석
-
-## 실행
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-현재 CSV는 화면과 위젯 동작을 확인하기 위한 임의의 예시 데이터입니다.
-실제 분석·발표 전 행정안전부, 중앙선거관리위원회 등 공식 공개자료로 교체해야 합니다.
-
-## 데이터 파일
-- data/demo_constituencies.csv
-- data/demo_history.csv
-- data/demo_region_seats.csv
-
-제23대 총선 가정은 제22대 경계를 고정하고 인구 기준일을 갱신하는 분석 설계입니다.
-실제 제23대 선거구 획정 결과로 표시하지 않습니다.
+# 국회의원 지역구 인구와 표의 등가성 분석\n\n실행: `pip install -r requirements.txt` 후 `streamlit run app.py`\n\n- 제22대 실제 선거구 경계 GeoJSON 표시\n- 외부 지도 타일을 제거해 API KEY REQUIRED 워터마크 방지\n- 차트 수치는 예시 CSV 기반이며 실제 통계가 아님\n- 차트 메뉴는 현재 데이터 열로 계산 가능한 분석으로 구성\n
