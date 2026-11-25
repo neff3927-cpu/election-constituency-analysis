@@ -92,7 +92,8 @@ with st.container(border=True):
     available_districts=sorted(current["선거구"].dropna().astype(str).unique()) if not current.empty else []
     with c: district=st.selectbox("선거구 검색",["전체 선거구"]+available_districts,key="district")
 
-use_demo=st.toggle("화면 점검용 예시 데이터 미리보기 (실제 통계 아님)",value=True)
+use_demo=st.toggle("화면 점검용 예시 데이터 미리보기 (실제 통계 아님)",value=False,
+                   help="실제 자료가 연결되기 전 화면 테스트용 가상 수치입니다. 발표·분석에는 사용하지 마세요.")
 if election=="제23대 총선 가정":
     st.info("제23대는 제22대 선거구 경계를 고정하고 인구수만 갱신하는 가정 분석입니다.")
     if has_cols(pop23,["시도","선거구","주민등록인구"]):
@@ -174,13 +175,25 @@ with map_col:
         elif map_metric=="인접 선거구 인구편차": fill="#e8eef4"
         else: fill=color(val)
         return {"fillColor":fill,"color":"#6b879f","weight":0.55,"fillOpacity":0.85}
-      m=folium.Map(location=[36.25,127.8],zoom_start=7,tiles=None,control_scale=True,prefer_canvas=True)
-      m.fit_bounds([[33.0,124.5],[38.7,131.0]])
-      folium.GeoJson(geo,style_function=style,highlight_function=lambda f:{"weight":2,"color":"#102a43","fillOpacity":.95},
-        tooltip=folium.GeoJsonTooltip(fields=["SIDO_SGG"],aliases=["선거구:"],sticky=False)).add_to(m)
-      st_folium(m,height=790,use_container_width=True,returned_objects=[])
-      st.caption("경계: OhmyNews 공개 제22대 선거구 GeoJSON(254개 지역구). 실제 인구자료의 지도명은 GeoJSON의 SIDO_SGG와 일치해야 색상이 연결됩니다.")
-      if map_metric=="인접 선거구 인구편차": st.info("인접 선거구 편차 지도는 공유 경계 분석 결과 파일이 연결되면 색상화합니다. 현재 지도는 중립색으로 표시합니다.")
+      # Basemap + GeoJSON-derived bounds prevent the district layer from appearing
+      # tiny or clipped at the bottom of the map frame.
+      m=folium.Map(location=[36.3,127.8],zoom_start=6,tiles="CartoDB positron",
+                   control_scale=True,prefer_canvas=True)
+      district_layer=folium.GeoJson(
+        geo, name="제22대 국회의원 선거구",
+        style_function=style,
+        highlight_function=lambda f:{"weight":2,"color":"#102a43","fillOpacity":.95},
+        tooltip=folium.GeoJsonTooltip(fields=["SIDO_SGG"],aliases=["선거구:"],sticky=False)
+      ).add_to(m)
+      bounds=district_layer.get_bounds()
+      if bounds and len(bounds)==2:
+          m.fit_bounds(bounds,padding=(18,18),max_zoom=7)
+      folium.LayerControl(collapsed=True).add_to(m)
+      st_folium(m,height=640,use_container_width=True,returned_objects=[])
+      st.caption("제22대 실제 선거구 경계 254개 · 바탕지도는 글자가 적은 CartoDB Positron을 사용합니다. 인구 색상은 지도명(SIDO_SGG)과 실제 자료의 지도명이 일치할 때 연결됩니다.")
+      if view.empty:
+          st.info("실제 선거구 인구자료가 아직 연결되지 않았습니다. 현재는 제22대 선거구 경계만 표시합니다.")
+      if map_metric=="인접 선거구 인구편차": st.info("인접 선거구 편차 지도는 adjacency_population.csv에 실제 인접 선거구 자료를 연결한 뒤 색상화합니다.")
     except Exception as e:
       st.error("선거구 경계를 불러오지 못했습니다. 인터넷 연결 또는 원본 저장소 상태를 확인하세요.")
       st.caption(type(e).__name__)
